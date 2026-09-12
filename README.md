@@ -30,24 +30,42 @@ Requisitos: Node.js 20+ (testado em Node 22).
 
 ## 2. Configurar o Supabase
 
-1. Crie um projeto em <https://supabase.com>.
-2. Abra **SQL Editor** e execute o conteudo de
-   [`supabase/migrations/20260101000000_init_multitenant.sql`](supabase/migrations/20260101000000_init_multitenant.sql).
-   O script e idempotente: pode ser rodado novamente sem quebrar nada.
-   Ele cria tabelas, enums, triggers, funcoes, todas as policies de RLS e o bucket de Storage.
-3. Em **Authentication > Providers > Email**, mantenha o provedor `Email` habilitado.
-4. Em **Authentication > URL Configuration**, defina:
+1. **Criar o projeto**: <https://supabase.com/dashboard> > **New project**. Escolha organizacao,
+   nome, uma senha forte de banco (guarde: ela nao aparece de novo) e a regiao mais proxima
+   (`South America (Sao Paulo)` para o Brasil). O provisionamento leva ~2 minutos.
+
+2. **Aplicar o schema**: abra **SQL Editor** > **New query**, cole todo o conteudo de
+   [`supabase/migrations/20260101000000_init_multitenant.sql`](supabase/migrations/20260101000000_init_multitenant.sql)
+   e clique em **Run**. O script e idempotente (pode rodar de novo sem quebrar nada) e cria
+   tabelas, enums, triggers, funcoes, todas as policies de RLS e o bucket de Storage.
+
+   Alternativa pela CLI, na sua maquina (precisa da senha do banco):
+
+   ```bash
+   npx supabase link --project-ref <ref-do-projeto>
+   npx supabase db push
+   ```
+
+3. **Conferir o que foi criado**: em **Table Editor** devem aparecer `profiles`, `businesses` e
+   `business_members`, todas com o cadeado de *RLS enabled*; em **Storage**, o bucket
+   `business-assets`.
+
+4. **Provedor de e-mail/senha**: **Authentication > Sign In / Providers > Email** habilitado.
+   A opcao **Confirm email** pode ficar ligada (producao) ou desligada (facilita os testes).
+
+5. **URLs de autenticacao**: **Authentication > URL Configuration**
    - **Site URL**: `http://localhost:3000` (em producao, o dominio real)
    - **Redirect URLs**: adicione `http://localhost:3000/auth/confirmar`
-     (e `https://SEU-DOMINIO/auth/confirmar` em producao)
-5. Em **Project Settings > API**, copie a `Project URL` e a chave `anon / publishable`.
+     (e `https://SEU-DOMINIO/auth/confirmar` quando publicar)
 
-Se preferir a CLI do Supabase:
+   Sem esse redirect, os links de confirmacao e de recuperacao de senha nao voltam para o app.
 
-```bash
-npx supabase link --project-ref <ref-do-projeto>
-npx supabase db push
-```
+6. **Credenciais**: **Project Settings > API**
+   - `Project URL` -> `NEXT_PUBLIC_SUPABASE_URL`
+   - chave `anon` / `publishable` -> `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+   A chave `service_role` / `secret` **nao e usada neste projeto**. Nunca a coloque no
+   `.env.local`, no codigo ou no Git: ela ignora todo o RLS.
 
 ## 3. Variaveis de ambiente
 
@@ -69,11 +87,12 @@ cp .env.example .env.local
 ## 4. Rodar localmente
 
 ```bash
-npm run dev        # http://localhost:3000
-npm run build      # build de producao
-npm run start      # servir o build
-npm run lint       # ESLint
-npm run typecheck  # TypeScript sem emitir arquivos
+npm run dev                # http://localhost:3000
+npm run build              # build de producao
+npm run start              # servir o build
+npm run lint               # ESLint
+npm run typecheck          # TypeScript sem emitir arquivos
+npm run validate:supabase  # validacao end-to-end contra o Supabase real (secao 5)
 ```
 
 Fluxo para testar: `/cadastro` -> confirmar e-mail -> `/onboarding` (cria a empresa) ->
@@ -81,7 +100,42 @@ Fluxo para testar: `/cadastro` -> confirmar e-mail -> `/onboarding` (cria a empr
 
 ---
 
-## 5. Estrutura do projeto
+## 5. Validar a Etapa 1 no Supabase real
+
+Com o `.env.local` preenchido e o schema aplicado:
+
+```bash
+npm run dev              # em um terminal
+npm run validate:supabase  # em outro
+```
+
+O script `scripts/validate-supabase.mjs` usa **apenas a URL e a anon key** e verifica, de ponta
+a ponta e contra o projeto real: conexao e schema, bucket de Storage, cadastro, login, login com
+senha errada, criacao do profile pelo trigger, criacao da empresa, promocao automatica a `owner`,
+edicao das configuracoes, slug duplicado, upload de logo, isolamento entre duas empresas
+(leitura, edicao, exclusao, auto-inclusao como membro, perfis e Storage), visitante anonimo,
+pedido de recuperacao de senha, logout e — com o app no ar — a protecao de `/dashboard`,
+`/dashboard/pedidos` e `/onboarding`, o redirecionamento de quem ja esta logado e a renderizacao
+da visao geral. Ao final ele apaga as empresas de teste que criou.
+
+Observacoes:
+
+- Se **Confirm email** estiver ativo, o script para e explica: desative temporariamente para a
+  validacao automatica e teste a confirmacao por e-mail manualmente com o seu endereco real.
+- Os usuarios de teste continuam em **Authentication > Users** e podem ser removidos a mao.
+- O SMTP padrao do Supabase tem limite baixo de envios; o script trata `over_email_send_rate_limit`
+  como aceitavel (o endpoint respondeu, so a entrega foi limitada).
+
+Checklist manual que complementa o script (precisa de um e-mail real):
+
+| Fluxo | Como testar |
+| ----- | ----------- |
+| Confirmacao de e-mail | cadastre-se em `/cadastro` e clique no link recebido |
+| Recuperacao de senha | `/recuperar-senha` > link do e-mail > `/nova-senha` |
+| Logout | botao **Sair** no topo do painel |
+| Upload de logo/capa | `/dashboard/configuracoes` |
+
+## 6. Estrutura do projeto
 
 ```
 src/
@@ -132,7 +186,7 @@ supabase/
 
 ---
 
-## 6. Banco de dados
+## 7. Banco de dados
 
 ### `profiles`
 Espelha `auth.users` (criado automaticamente pelo trigger `on_auth_user_created`).
@@ -183,7 +237,7 @@ policies e so respondem sobre o usuario autenticado (`auth.uid()`).
 
 ---
 
-## 7. Policies de RLS
+## 8. Policies de RLS
 
 RLS habilitado em `profiles`, `businesses`, `business_members` e `storage.objects`.
 
@@ -222,7 +276,7 @@ psql "$DATABASE_URL" -f supabase/tests/01_rls_test.sql
 
 ---
 
-## 8. O que ja funciona
+## 9. O que ja funciona
 
 - Cadastro, login, logout e recuperacao de senha (Supabase Auth + Server Actions).
 - Criacao da empresa no onboarding, com slug unico validado.
@@ -233,7 +287,7 @@ psql "$DATABASE_URL" -f supabase/tests/01_rls_test.sql
   (upload para o Storage, isolado por pasta da empresa).
 - Troca de empresa ativa quando o usuario pertence a mais de um estabelecimento.
 
-## 9. Proximo passo recomendado
+## 10. Proximo passo recomendado
 
 Modulo de **cardapio**: tabelas `categories` e `products` com `business_id`, as mesmas
 policies de RLS por empresa, CRUD em `/dashboard/cardapio` e, em seguida, a pagina publica
