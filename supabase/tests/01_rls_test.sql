@@ -16,8 +16,10 @@
 \pset tuples_only on
 
 -- ============ SETUP (como service role / superuser) ============
+-- A ordem importa: apagar business_members direto dispara o trigger que
+-- protege o ultimo owner. Apagando as empresas primeiro, o cascade limpa os
+-- membros e o trigger se desliga (a empresa ja nao existe).
 delete from storage.objects;
-delete from public.business_members;
 delete from public.businesses;
 delete from public.profiles;
 delete from auth.users;
