@@ -58,6 +58,33 @@ function loadEnv(file = '.env.local') {
 const anonClient = (url, key) =>
   createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
+/** Traduz a falha de cadastro na acao concreta que resolve. */
+function signUpHint(error) {
+  const code = error?.code ?? '';
+  const message = (error?.message ?? '').toLowerCase();
+
+  if (code === 'over_email_send_rate_limit' || message.includes('email rate limit')) {
+    return (
+      'O limite de envio de e-mails do Supabase foi atingido. Isso so acontece porque "Confirm email" ' +
+      'esta LIGADO: com ele ligado, cada cadastro dispara um e-mail, e o SMTP padrao permite poucos por hora. ' +
+      'Desligue em Authentication > Sign In / Providers > Email (botao Save) e rode o script de novo — ' +
+      'sem confirmacao nenhum e-mail e enviado e o limite deixa de valer. ' +
+      'Religue depois para testar a confirmacao manualmente com o seu e-mail real.'
+    );
+  }
+  if (code === 'signup_disabled' || message.includes('signups not allowed')) {
+    return 'Cadastro desativado. Ligue "Allow new users to sign up" em Authentication > Sign In / Providers.';
+  }
+  if (code === 'email_provider_disabled' || message.includes('email signups are disabled')) {
+    return 'Provedor Email desativado. Ligue "Enable Email provider" em Authentication > Sign In / Providers > Email.';
+  }
+  if (code === 'email_address_invalid') {
+    return 'O Supabase recusou os enderecos de teste. Verifique se ha restricao de dominio em Authentication > Attack Protection.';
+  }
+
+  return 'Confira Authentication > Sign In / Providers > Email: provedor habilitado e cadastro liberado.';
+}
+
 // ------------------------------------------------------------------- inicio
 const env = loadEnv();
 const URL_ = env.NEXT_PUBLIC_SUPABASE_URL;
@@ -147,9 +174,7 @@ try {
   {
     const { data, error } = await signUpWithFallback(clientA, userA, 'QA Owner A');
     check('cadastro do usuario A', !error, error?.message ?? userA.email);
-    if (error) {
-      stop('o cadastro falhou.', 'Verifique se o provedor Email esta habilitado em Authentication > Sign In / Providers.');
-    }
+    if (error) stop('o cadastro falhou.', signUpHint(error));
 
     if (!data.session) {
       console.log('\n\x1b[33mConfirmacao de e-mail esta ATIVA neste projeto.\x1b[0m');
@@ -240,7 +265,12 @@ try {
   {
     const { data, error } = await signUpWithFallback(clientB, userB, 'QA Owner B');
     check('cadastro do usuario B', !error && !!data?.session, error?.message ?? userB.email);
-    if (error || !data?.session) stop('nao consegui criar o segundo usuario para testar o isolamento.');
+    if (error || !data?.session) {
+      stop(
+        'nao consegui criar o segundo usuario para testar o isolamento.',
+        error ? signUpHint(error) : 'Desligue "Confirm email" em Authentication > Sign In / Providers > Email.',
+      );
+    }
   }
 
   {
