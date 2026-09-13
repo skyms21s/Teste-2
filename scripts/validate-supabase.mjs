@@ -18,12 +18,20 @@ import { createServerClient } from '@supabase/ssr';
 // ---------------------------------------------------------------- utilidades
 const results = [];
 let failures = 0;
+let skipped = 0;
 
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail });
   const icon = ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFALHA\x1b[0m';
   console.log(`  ${icon} ${name}${detail ? ` \x1b[90m(${detail})\x1b[0m` : ''}`);
   if (!ok) failures += 1;
+}
+
+/** Verificacao que nao se aplica neste ambiente: nao conta como OK nem como falha. */
+function skip(name, reason) {
+  results.push({ name, ok: null, detail: reason });
+  skipped += 1;
+  console.log(`  \x1b[90mPULADO\x1b[0m ${name} \x1b[90m(${reason})\x1b[0m`);
 }
 
 function section(title) {
@@ -385,14 +393,22 @@ try {
     const { error } = await clientA.auth.resetPasswordForEmail(userA.email, {
       redirectTo: `${SITE}/auth/confirmar?next=%2Fnova-senha`,
     });
-    const rateLimited = error?.code === 'over_email_send_rate_limit';
-    check(
-      'pedido de recuperacao de senha aceito',
-      !error || rateLimited,
-      rateLimited
-        ? 'limite de e-mails do SMTP padrao atingido (endpoint OK; teste a entrega com seu e-mail real)'
-        : (error?.message ?? 'e-mail disparado pelo Supabase'),
-    );
+    if (!error) {
+      check('pedido de recuperacao de senha aceito', true, 'e-mail disparado pelo Supabase');
+    } else if (error.code === 'email_address_invalid') {
+      skip(
+        'pedido de recuperacao de senha',
+        'o Supabase nao envia para dominios reservados de teste (example.com) — ' +
+          'teste a recuperacao com o seu e-mail real, pela tela /recuperar-senha',
+      );
+    } else if (error.code === 'over_email_send_rate_limit') {
+      skip(
+        'pedido de recuperacao de senha',
+        'limite de envio do SMTP padrao atingido — o endpoint respondeu, mas o e-mail nao saiu',
+      );
+    } else {
+      check('pedido de recuperacao de senha aceito', false, error.message);
+    }
   }
 
   {
@@ -478,10 +494,18 @@ try {
     check('limpeza', false, error.message);
   }
 
+  const total = results.length - skipped;
   console.log(
-    `\n\x1b[1mResultado:\x1b[0m ${results.filter((r) => r.ok).length}/${results.length} verificacoes OK` +
+    `\n\x1b[1mResultado:\x1b[0m ${results.filter((r) => r.ok).length}/${total} verificacoes OK` +
+      (skipped ? `, \x1b[90m${skipped} pulada(s)\x1b[0m` : '') +
       (failures ? `, \x1b[31m${failures} falha(s)\x1b[0m` : ', \x1b[32mnenhuma falha\x1b[0m'),
   );
+  if (skipped) {
+    console.log(
+      '\x1b[90mAs verificacoes puladas dependem de um e-mail real e entram no teste manual ' +
+        '(confirmacao de cadastro e recuperacao de senha).\x1b[0m',
+    );
+  }
   console.log(
     `\x1b[90mOs usuarios de teste (${userA.email} e ${userB.email}) continuam em Authentication > Users; ` +
       `remova manualmente se quiser.\x1b[0m\n`,
