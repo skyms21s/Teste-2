@@ -157,6 +157,25 @@ set local role anon;
 select count(*) from storage.objects where bucket_id = 'business-assets';
 rollback;
 
+-- ============ PADRAO DE CRIACAO DA EMPRESA ============
+-- INSERT ... RETURNING aplica a policy de LEITURA na linha devolvida, e o
+-- vinculo de owner so existe depois do trigger AFTER INSERT. Por isso o app
+-- insere sem RETURNING e le a empresa em seguida.
+begin;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002"}';
+\echo '--- T23 INSERT ... RETURNING na criacao e recusado (esperado: ERRO 42501)'
+insert into public.businesses (name, slug) values ('Com Returning', 'com-returning') returning id;
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002"}';
+\echo '--- T24 padrao do app: INSERT sem RETURNING e leitura depois (esperado: nova-loja)'
+insert into public.businesses (name, slug) values ('Nova Loja', 'nova-loja');
+select slug from public.businesses where slug = 'nova-loja';
+rollback;
+
 -- ============ PROTECAO DO ULTIMO OWNER / CASCADE ============
 begin;
 set local role authenticated;

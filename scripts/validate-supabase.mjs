@@ -85,6 +85,28 @@ function signUpHint(error) {
   return 'Confira Authentication > Sign In / Providers > Email: provedor habilitado e cadastro liberado.';
 }
 
+/** Diagnostica a recusa do INSERT em businesses com o estado real da sessao. */
+function insertHint(error, session, user) {
+  if (error.code !== '42501') return error.message;
+
+  if (!session || !user) {
+    return (
+      'O pedido chegou ao Supabase SEM sessao (como visitante anonimo), por isso o RLS recusou. ' +
+      'Rode o script de novo; se repetir, o login nao esta sendo mantido entre as chamadas.'
+    );
+  }
+
+  return (
+    `A sessao esta ativa (usuario ${user.id}), entao o RLS recusou o INSERT mesmo com o usuario logado. ` +
+    'Isso indica que a policy de insercao nao foi criada. No SQL Editor do Supabase rode:\n\n' +
+    "    select policyname, cmd, roles::text, with_check\n" +
+    "      from pg_policies where schemaname='public' and tablename='businesses';\n\n" +
+    'Tem que aparecer businesses_insert_authenticated com cmd=INSERT, roles={authenticated} e ' +
+    'with_check=(auth.uid() IS NOT NULL). Se nao aparecer, rode a migration novamente ' +
+    '(supabase/migrations/20260101000000_init_multitenant.sql) e repita a validacao.'
+  );
+}
+
 // ------------------------------------------------------------------- inicio
 const env = loadEnv();
 const URL_ = env.NEXT_PUBLIC_SUPABASE_URL;
@@ -206,21 +228,35 @@ try {
   }
 
   {
-    const { error } = await clientA.auth.signInWithPassword({ ...userA, password: 'senha-errada-123' });
+    // Cliente separado: uma tentativa falha nunca pode afetar a sessao do usuario A.
+    const probe = anonClient(URL_, KEY);
+    const { error } = await probe.auth.signInWithPassword({ ...userA, password: 'senha-errada-123' });
     check('login com senha errada e rejeitado', !!error, error?.code ?? '');
-    await clientA.auth.signInWithPassword(userA);
   }
 
   // ------------------------------------------------------------- 3. empresa
   section('3. Empresa (multitenant)');
   {
-    const { data, error } = await clientA
+    const { data: sessionCheck } = await clientA.auth.getUser();
+    check('sessao ativa antes de criar a empresa', !!sessionCheck.user, sessionCheck.user?.id ?? 'sem sessao');
+
+    // Mesmo padrao do app: INSERT sem RETURNING (a policy de leitura so passa
+    // depois que o trigger grava o vinculo de owner), seguido da leitura.
+    const { error } = await clientA
       .from('businesses')
-      .insert({ name: 'QA Empresa A', slug: slugA, phone: '11999990000' })
-      .select('*')
-      .single();
+      .insert({ name: 'QA Empresa A', slug: slugA, phone: '11999990000' });
+
+    const { data } = error
+      ? { data: null }
+      : await clientA.from('businesses').select('*').eq('slug', slugA).single();
+
     check('criacao da empresa A', !error && !!data, error?.message ?? slugA);
     businessA = data;
+
+    if (error) {
+      const { data: current } = await clientA.auth.getSession();
+      stop('nao consegui criar a empresa A.', insertHint(error, current.session, sessionCheck.user));
+    }
   }
 
   if (businessA) {
@@ -274,11 +310,14 @@ try {
   }
 
   {
-    const { data, error } = await clientB
+    const { error } = await clientB
       .from('businesses')
-      .insert({ name: 'QA Empresa B', slug: slugB })
-      .select('*')
-      .single();
+      .insert({ name: 'QA Empresa B', slug: slugB });
+
+    const { data } = error
+      ? { data: null }
+      : await clientB.from('businesses').select('*').eq('slug', slugB).single();
+
     check('criacao da empresa B', !error && !!data, error?.message ?? slugB);
     businessB = data;
   }
