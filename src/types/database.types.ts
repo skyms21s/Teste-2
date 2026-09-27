@@ -219,6 +219,7 @@ export interface Database {
         Returns: boolean;
       };
       shares_business_with: { Args: { p_user_id: string }; Returns: boolean };
+      get_public_menu: { Args: { p_slug: string }; Returns: Json };
     };
     Enums: {
       business_plan: BusinessPlan;

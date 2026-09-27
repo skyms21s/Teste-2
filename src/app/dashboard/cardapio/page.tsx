@@ -4,7 +4,7 @@ import { EmptyState } from '@/components/dashboard/empty-state';
 import { MenuList } from '@/components/menu/menu-list';
 import { Alert } from '@/components/ui/alert';
 import { ButtonLink } from '@/components/ui/button';
-import { ROUTES } from '@/lib/constants/routes';
+import { ROUTES, storePath } from '@/lib/constants/routes';
 import { ROLE_LABELS } from '@/lib/utils/labels';
 import { requireActiveBusiness } from '@/services/business.service';
 import { canManageMenu, getMenu } from '@/services/menu.service';
@@ -24,6 +24,9 @@ export default async function MenuPage() {
         action={
           canManage ? (
             <div className="flex flex-wrap gap-2">
+              <ButtonLink href={storePath(business.slug)} target="_blank" variant="ghost">
+                Ver cardapio publico ↗
+              </ButtonLink>
               <ButtonLink href={`${ROUTES.menu}/categorias/nova`} variant="secondary">
                 Nova categoria
               </ButtonLink>

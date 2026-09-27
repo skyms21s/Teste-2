@@ -23,6 +23,37 @@ export type BusinessInsert = Tables['businesses']['Insert'];
 export type BusinessUpdate = Tables['businesses']['Update'];
 export type ProfileUpdate = Tables['profiles']['Update'];
 
+/** Vitrine publica (o que public.get_public_menu devolve). */
+export interface PublicBusiness {
+  name: string;
+  slug: string;
+  logo_url: string | null;
+  cover_url: string | null;
+  phone: string | null;
+  address: string | null;
+  description: string | null;
+}
+
+export interface PublicProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  image_url: string | null;
+}
+
+export interface PublicCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  products: PublicProduct[];
+}
+
+export interface PublicMenu {
+  business: PublicBusiness;
+  categories: PublicCategory[];
+}
+
 /** Empresa acompanhada do papel do usuario logado nela. */
 export type BusinessWithRole = Business & { role: BusinessMember['role'] };
 

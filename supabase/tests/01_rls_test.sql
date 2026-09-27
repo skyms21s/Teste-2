@@ -176,6 +176,45 @@ insert into public.businesses (name, slug) values ('Nova Loja', 'nova-loja');
 select slug from public.businesses where slug = 'nova-loja';
 rollback;
 
+-- ============ PLANO E STATUS PROTEGIDOS (colunas) ============
+-- O RLS autoriza a linha; os privilegios de coluna limitam O QUE o cliente escreve.
+begin;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001"}';
+\echo '--- T25 owner edita campo permitido (esperado: 1)'
+with u as (update public.businesses set description = 'Nova descricao'
+            where id = '11111111-0000-4000-8000-00000000000a' returning 1)
+select count(*) from u;
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001"}';
+\echo '--- T26 owner tenta se promover de plano (esperado: ERRO 42501)'
+update public.businesses set plan = 'enterprise' where id = '11111111-0000-4000-8000-00000000000a';
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001"}';
+\echo '--- T27 owner tenta mudar o proprio status (esperado: ERRO 42501)'
+update public.businesses set status = 'active' where id = '11111111-0000-4000-8000-00000000000a';
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-4000-8000-000000000001"}';
+\echo '--- T28 owner tenta trocar o slug (esperado: ERRO 42501)'
+update public.businesses set slug = 'outro-link' where id = '11111111-0000-4000-8000-00000000000a';
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-4000-8000-000000000002"}';
+\echo '--- T29 criar empresa ja no plano pago (esperado: ERRO 42501)'
+insert into public.businesses (name, slug, plan) values ('Esperta', 'loja-esperta', 'enterprise');
+rollback;
+
 -- ============ PROTECAO DO ULTIMO OWNER / CASCADE ============
 begin;
 set local role authenticated;

@@ -183,14 +183,35 @@ try {
 
   {
     const supabase = anonClient(URL_, KEY);
-    for (const table of ['businesses', 'profiles', 'business_members']) {
+    // Cada tabela aponta o migration que a cria, para a dica ja dizer o que rodar.
+    const MIGRATION_OF = {
+      businesses: '20260101000000_init_multitenant.sql',
+      profiles: '20260101000000_init_multitenant.sql',
+      business_members: '20260101000000_init_multitenant.sql',
+      categories: '20260201000000_menu.sql',
+      products: '20260201000000_menu.sql',
+    };
+
+    for (const [table, migration] of Object.entries(MIGRATION_OF)) {
       const { error } = await supabase.from(table).select('id').limit(1);
       const missing = error?.code === 'PGRST205' || error?.code === '42P01';
       check(`tabela public.${table} existe`, !missing, missing ? error.message : '');
       if (missing) {
         stop(
           `a tabela ${table} nao existe no projeto.`,
-          'Rode supabase/migrations/20260101000000_init_multitenant.sql no SQL Editor do Supabase.',
+          `Rode supabase/migrations/${migration} no SQL Editor do Supabase (os arquivos vao na ordem do nome).`,
+        );
+      }
+    }
+
+    {
+      const { error } = await supabase.rpc('get_public_menu', { p_slug: 'verificacao-de-schema' });
+      const missing = error?.code === 'PGRST202' || error?.code === '42883';
+      check('funcao get_public_menu existe', !missing, missing ? error.message : '');
+      if (missing) {
+        stop(
+          'a funcao da loja publica nao existe no projeto.',
+          'Rode supabase/migrations/20260301000000_public_store.sql no SQL Editor do Supabase.',
         );
       }
     }
@@ -293,6 +314,22 @@ try {
       .from('businesses')
       .insert({ name: 'QA Slug Duplicado', slug: slugA });
     check('slug duplicado e bloqueado', error?.code === '23505', error?.code ?? 'sem erro');
+  }
+
+  {
+    const { error } = await clientA
+      .from('businesses')
+      .update({ plan: 'enterprise' })
+      .eq('id', businessA.id);
+    check('owner nao consegue mudar o proprio plano', error?.code === '42501', error?.code ?? 'ALTEROU!');
+  }
+
+  {
+    const { error } = await clientA
+      .from('businesses')
+      .update({ status: 'active' })
+      .eq('id', businessA.id);
+    check('owner nao consegue mudar o proprio status', error?.code === '42501', error?.code ?? 'ALTEROU!');
   }
 
   {
@@ -477,8 +514,44 @@ try {
     );
   }
 
-  // -------------------------------------------------- 6. recuperacao/logout
-  section('6. Recuperacao de senha e logout');
+  // ------------------------------------------------------- 6. loja publica
+  section('6. Loja publica (/loja/{slug})');
+  {
+    const visitor = anonClient(URL_, KEY);
+    const { data, error } = await visitor.rpc('get_public_menu', { p_slug: slugA });
+    const names = JSON.stringify(data ?? {});
+    check(
+      'visitante anonimo le o cardapio publico',
+      !error && data?.business?.name === 'QA Empresa A - editada',
+      error?.message ?? data?.business?.name ?? 'sem dados',
+    );
+    check('produto ativo aparece na vitrine', names.includes('QA X-Salada'), '');
+    check(
+      'vitrine nao expoe plano, status nem ids da empresa',
+      data && !('plan' in data.business) && !('status' in data.business) && !('id' in data.business),
+      Object.keys(data?.business ?? {}).join(', '),
+    );
+
+    const { data: missing } = await visitor.rpc('get_public_menu', { p_slug: `nao-existe-${stamp}` });
+    check('slug inexistente devolve vazio', missing === null, JSON.stringify(missing));
+
+    if (productA) {
+      await clientA.from('products').update({ is_active: false }).eq('id', productA.id);
+      const { data: afterHide } = await visitor.rpc('get_public_menu', { p_slug: slugA });
+      check(
+        'produto ocultado some da vitrine',
+        !JSON.stringify(afterHide ?? {}).includes('QA X-Salada'),
+        '',
+      );
+      await clientA.from('products').update({ is_active: true }).eq('id', productA.id);
+    }
+
+    const { data: rows } = await visitor.from('businesses').select('id');
+    check('visitante continua sem ler a tabela direto', (rows?.length ?? 0) === 0, `${rows?.length ?? 0} linha(s)`);
+  }
+
+  // -------------------------------------------------- 7. recuperacao/logout
+  section('7. Recuperacao de senha e logout');
   {
     const { error } = await clientA.auth.resetPasswordForEmail(userA.email, {
       redirectTo: `${SITE}/auth/confirmar?next=%2Fnova-senha`,
@@ -513,8 +586,8 @@ try {
     check('visitante anonimo nao enxerga empresas', (data?.length ?? 0) === 0, `${data?.length ?? 0} linha(s)`);
   }
 
-  // ------------------------------------------------------- 7. app (SSR/rotas)
-  section('7. Aplicacao Next.js (protecao de rotas)');
+  // ------------------------------------------------------- 8. app (SSR/rotas)
+  section('8. Aplicacao Next.js (protecao de rotas)');
   const appUp = await fetch('http://localhost:3000/', { redirect: 'manual' })
     .then((r) => r.status < 500)
     .catch(() => false);
@@ -575,6 +648,21 @@ try {
     }
 
     {
+      const res = await visit(`/loja/${slugA}`);
+      const html = await res.text();
+      check(
+        'pagina publica da loja abre sem login',
+        res.status === 200 && html.includes('QA X-Salada'),
+        `HTTP ${res.status}`,
+      );
+    }
+
+    {
+      const res = await visit(`/loja/nao-existe-${stamp}`);
+      check('loja inexistente responde 404', res.status === 404, `HTTP ${res.status}`);
+    }
+
+    {
       const res = await visit('/dashboard/cardapio/produtos/novo', { cookie: cookieHeader });
       const html = await res.text();
       check(
@@ -585,8 +673,8 @@ try {
     }
   }
 } finally {
-  // ------------------------------------------------------------- 8. limpeza
-  section('8. Limpeza');
+  // ------------------------------------------------------------- 9. limpeza
+  section('9. Limpeza');
   try {
     if (businessA && clientA) {
       await clientA.storage.from('business-assets').remove([`${businessA.id}/logo-${stamp}.png`]);
