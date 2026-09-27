@@ -120,6 +120,95 @@ export interface Database {
           },
         ];
       };
+      categories: {
+        Row: {
+          id: string;
+          business_id: string;
+          name: string;
+          description: string | null;
+          position: number;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          name: string;
+          description?: string | null;
+          position?: number;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          name?: string;
+          description?: string | null;
+          position?: number;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'categories_business_id_fkey';
+            columns: ['business_id'];
+            referencedRelation: 'businesses';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      products: {
+        Row: {
+          id: string;
+          business_id: string;
+          category_id: string;
+          name: string;
+          description: string | null;
+          price: number;
+          image_url: string | null;
+          is_active: boolean;
+          position: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          category_id: string;
+          name: string;
+          description?: string | null;
+          price: number;
+          image_url?: string | null;
+          is_active?: boolean;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          business_id?: string;
+          category_id?: string;
+          name?: string;
+          description?: string | null;
+          price?: number;
+          image_url?: string | null;
+          is_active?: boolean;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'products_category_same_business_fkey';
+            columns: ['category_id', 'business_id'];
+            referencedRelation: 'categories';
+            referencedColumns: ['id', 'business_id'];
+          },
+        ];
+      };
     };
     Views: Record<never, never>;
     Functions: {

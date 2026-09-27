@@ -3,10 +3,13 @@
 Base multiempresa (multitenant) de um SaaS de **cardapio digital e gestao de pedidos** para
 restaurantes, hamburguerias, pizzarias, acaiterias e similares.
 
-Esta primeira etapa entrega **apenas a fundacao** do sistema: autenticacao, estrutura
-multiempresa, RLS, protecao de rotas e o painel inicial. Produtos, categorias, carrinho,
-pedidos, impressao, pagamentos e integracoes **ainda nao existem** — o projeto foi organizado
-para receber esses modulos sem retrabalho.
+Etapas concluidas:
+
+1. **Fundacao** — autenticacao, estrutura multiempresa, RLS, protecao de rotas e painel.
+2. **Cardapio** — categorias e produtos por empresa, com papeis e isolamento.
+
+Carrinho, pedidos, impressao termica, pagamentos e integracoes **ainda nao existem** — o
+projeto foi organizado para receber esses modulos sem retrabalho.
 
 ## Stack
 
@@ -34,10 +37,15 @@ Requisitos: Node.js 20+ (testado em Node 22).
    nome, uma senha forte de banco (guarde: ela nao aparece de novo) e a regiao mais proxima
    (`South America (Sao Paulo)` para o Brasil). O provisionamento leva ~2 minutos.
 
-2. **Aplicar o schema**: abra **SQL Editor** > **New query**, cole todo o conteudo de
-   [`supabase/migrations/20260101000000_init_multitenant.sql`](supabase/migrations/20260101000000_init_multitenant.sql)
-   e clique em **Run**. O script e idempotente (pode rodar de novo sem quebrar nada) e cria
-   tabelas, enums, triggers, funcoes, todas as policies de RLS e o bucket de Storage.
+2. **Aplicar o schema**: abra **SQL Editor** > **New query** e rode os arquivos de
+   `supabase/migrations/` **na ordem**, um de cada vez (cole o conteudo e clique em **Run**):
+
+   | Ordem | Arquivo | O que cria |
+   | ----- | ------- | ---------- |
+   | 1 | [`20260101000000_init_multitenant.sql`](supabase/migrations/20260101000000_init_multitenant.sql) | enums, `profiles`, `businesses`, `business_members`, funcoes, triggers, RLS e o bucket de Storage |
+   | 2 | [`20260201000000_menu.sql`](supabase/migrations/20260201000000_menu.sql) | `categories`, `products` e as policias de RLS do cardapio |
+
+   Os scripts sao idempotentes: podem ser rodados de novo sem quebrar nada.
 
    Alternativa pela CLI, na sua maquina (precisa da senha do banco):
 
@@ -46,9 +54,9 @@ Requisitos: Node.js 20+ (testado em Node 22).
    npx supabase db push
    ```
 
-3. **Conferir o que foi criado**: em **Table Editor** devem aparecer `profiles`, `businesses` e
-   `business_members`, todas com o cadeado de *RLS enabled*; em **Storage**, o bucket
-   `business-assets`.
+3. **Conferir o que foi criado**: em **Table Editor** devem aparecer `profiles`, `businesses`,
+   `business_members`, `categories` e `products`, todas com o cadeado de *RLS enabled*; em
+   **Storage**, o bucket `business-assets`.
 
 4. **Provedor de e-mail/senha**: **Authentication > Sign In / Providers > Email** habilitado.
    A opcao **Confirm email** pode ficar ligada (producao) ou desligada (facilita os testes).
@@ -100,7 +108,7 @@ Fluxo para testar: `/cadastro` -> confirmar e-mail -> `/onboarding` (cria a empr
 
 ---
 
-## 5. Validar a Etapa 1 no Supabase real
+## 5. Validar no Supabase real
 
 Com o `.env.local` preenchido e o schema aplicado:
 
@@ -113,10 +121,12 @@ O script `scripts/validate-supabase.mjs` usa **apenas a URL e a anon key** e ver
 a ponta e contra o projeto real: conexao e schema, bucket de Storage, cadastro, login, login com
 senha errada, criacao do profile pelo trigger, criacao da empresa, promocao automatica a `owner`,
 edicao das configuracoes, slug duplicado, upload de logo, isolamento entre duas empresas
-(leitura, edicao, exclusao, auto-inclusao como membro, perfis e Storage), visitante anonimo,
-pedido de recuperacao de senha, logout e — com o app no ar — a protecao de `/dashboard`,
-`/dashboard/pedidos` e `/onboarding`, o redirecionamento de quem ja esta logado e a renderizacao
-da visao geral. Ao final ele apaga as empresas de teste que criou.
+(leitura, edicao, exclusao, auto-inclusao como membro, perfis e Storage), o cardapio (criar
+categoria e produto, categoria duplicada, exclusao bloqueada por produtos vinculados e
+isolamento das duas empresas), visitante anonimo, pedido de recuperacao de senha, logout e —
+com o app no ar — a protecao de `/dashboard`, `/dashboard/pedidos` e `/onboarding`, o
+redirecionamento de quem ja esta logado, a visao geral e a tela de cardapio. Ao final ele apaga
+as empresas de teste que criou (o cardapio vai junto, por cascata).
 
 Observacoes:
 
@@ -150,7 +160,12 @@ src/
 │   ├── dashboard/               # area privada
 │   │   ├── layout.tsx           # 2a camada de protecao + shell do painel
 │   │   ├── page.tsx             # Visao geral
-│   │   ├── pedidos|cardapio|clientes|relatorios/   # placeholders
+│   │   ├── cardapio/            # categorias e produtos (owner e manager)
+│   │   │   ├── page.tsx         # lista o cardapio
+│   │   │   ├── actions.ts       # criar/editar/excluir categoria e produto
+│   │   │   ├── categorias/      # nova e [id] (editar)
+│   │   │   └── produtos/        # novo e [id] (editar)
+│   │   ├── pedidos|clientes|relatorios/            # placeholders
 │   │   ├── configuracoes/       # dados da empresa (somente owner)
 │   │   └── actions.ts           # troca de empresa ativa
 │   ├── onboarding/              # criacao da primeira empresa
@@ -160,14 +175,15 @@ src/
 │   ├── ui/                      # Button, Input, Card, Alert, Badge, ...
 │   ├── auth/                    # formularios de autenticacao
 │   ├── dashboard/               # shell, sidebar, navegacao, troca de empresa
-│   └── business/                # formularios da empresa e upload de imagens
+│   ├── business/                # formularios da empresa e upload de imagens
+│   └── menu/                    # lista do cardapio, formularios e acoes
 ├── lib/
 │   ├── supabase/                # client (browser), server, proxy, erros
 │   ├── validations/             # schemas Zod
 │   ├── constants/               # rotas e menu lateral
 │   ├── utils/                   # cn, slugify, labels
 │   └── env.ts                   # leitura validada das variaveis de ambiente
-├── services/                    # acesso a dados (auth, empresas, membros)
+├── services/                    # acesso a dados (auth, empresas, membros, cardapio, storage)
 ├── types/                       # tipos do banco e do dominio
 └── proxy.ts                     # protecao de rotas + renovacao de sessao
 
@@ -222,6 +238,38 @@ Espelha `auth.users` (criado automaticamente pelo trigger `on_auth_user_created`
 Restricao `unique (business_id, user_id)`: um usuario entra uma unica vez por empresa, mas
 pode pertencer a varias empresas, e cada empresa pode ter varios funcionarios.
 
+### `categories` (secoes do cardapio)
+
+| Coluna | Tipo |
+| ------ | ---- |
+| `id` | uuid (PK) |
+| `business_id` | uuid -> businesses (on delete cascade) |
+| `name` | text — **unico por empresa** |
+| `description` | text |
+| `position` | int — ordem de exibicao |
+| `is_active` | boolean |
+| `created_at`, `updated_at` | timestamptz |
+
+### `products` (itens do cardapio)
+
+| Coluna | Tipo |
+| ------ | ---- |
+| `id` | uuid (PK) |
+| `business_id` | uuid -> businesses (on delete cascade) |
+| `category_id` | uuid |
+| `name` | text |
+| `description` | text |
+| `price` | numeric(10,2), `>= 0` |
+| `image_url` | text (Storage) |
+| `is_active` | boolean |
+| `position` | int |
+| `created_at`, `updated_at` | timestamptz |
+
+A FK e **composta**: `(category_id, business_id)` referencia `categories (id, business_id)`.
+Isso garante, no proprio banco, que um produto nunca aponta para a categoria de outra empresa.
+Ela e `on delete restrict`: nao da para excluir uma categoria que ainda tem produtos (a tela
+mostra o aviso). Excluir a **empresa** continua funcionando e leva o cardapio junto.
+
 ### Triggers
 
 - `on_auth_user_created` — cria o `profile` de cada novo usuario.
@@ -239,7 +287,8 @@ policies e so respondem sobre o usuario autenticado (`auth.uid()`).
 
 ## 8. Policies de RLS
 
-RLS habilitado em `profiles`, `businesses`, `business_members` e `storage.objects`.
+RLS habilitado em `profiles`, `businesses`, `business_members`, `categories`, `products` e
+`storage.objects`.
 
 | Tabela | Policy | Operacao | Regra |
 | ------ | ------ | -------- | ----- |
@@ -254,6 +303,14 @@ RLS habilitado em `profiles`, `businesses`, `business_members` e `storage.object
 | `business_members` | `business_members_insert_owner` | INSERT | somente `owner` |
 | `business_members` | `business_members_update_owner` | UPDATE | somente `owner` |
 | `business_members` | `business_members_delete_owner` | DELETE | somente `owner` |
+| `categories` | `categories_select_members` | SELECT | qualquer membro da empresa |
+| `categories` | `categories_insert_managers` | INSERT | somente `owner` e `manager` |
+| `categories` | `categories_update_managers` | UPDATE | somente `owner` e `manager` |
+| `categories` | `categories_delete_managers` | DELETE | somente `owner` e `manager` |
+| `products` | `products_select_members` | SELECT | qualquer membro da empresa |
+| `products` | `products_insert_managers` | INSERT | somente `owner` e `manager` |
+| `products` | `products_update_managers` | UPDATE | somente `owner` e `manager` |
+| `products` | `products_delete_managers` | DELETE | somente `owner` e `manager` |
 | `storage.objects` | `business_assets_public_read` | SELECT | leitura publica do bucket `business-assets` |
 | `storage.objects` | `business_assets_insert_members` | INSERT | `owner`/`manager` e apenas na pasta `{business_id}/` |
 | `storage.objects` | `business_assets_update_members` | UPDATE | idem |
@@ -268,7 +325,9 @@ Pode ser executada em qualquer Postgres 16:
 ```bash
 psql "$DATABASE_URL" -f supabase/tests/00_supabase_stub.sql   # apenas fora do Supabase
 psql "$DATABASE_URL" -f supabase/migrations/20260101000000_init_multitenant.sql
-psql "$DATABASE_URL" -f supabase/tests/01_rls_test.sql
+psql "$DATABASE_URL" -f supabase/migrations/20260201000000_menu.sql
+psql "$DATABASE_URL" -f supabase/tests/01_rls_test.sql        # fundacao (24 casos)
+psql "$DATABASE_URL" -f supabase/tests/02_menu_test.sql       # cardapio (19 casos)
 ```
 
 > `00_supabase_stub.sql` recria o minimo dos schemas `auth` e `storage`. **Nao rode esse
@@ -286,9 +345,12 @@ psql "$DATABASE_URL" -f supabase/tests/01_rls_test.sql
 - Configuracoes: o `owner` edita nome, telefone, endereco, descricao, logo e capa
   (upload para o Storage, isolado por pasta da empresa).
 - Troca de empresa ativa quando o usuario pertence a mais de um estabelecimento.
+- **Cardapio**: categorias e produtos por empresa, com foto, preco em reais, ordem de exibicao
+  e liga/desliga de disponibilidade. `owner` e `manager` editam; `employee` apenas visualiza.
 
 ## 10. Proximo passo recomendado
 
-Modulo de **cardapio**: tabelas `categories` e `products` com `business_id`, as mesmas
-policies de RLS por empresa, CRUD em `/dashboard/cardapio` e, em seguida, a pagina publica
-`/loja/[slug]`.
+**Pagina publica do cardapio** em `/loja/[slug]`: leitura anonima das empresas ativas pelo
+slug e dos itens marcados como ativos (novas policies de SELECT para o papel `anon`, sem abrir
+nada alem do necessario), layout do cardapio com logo e capa. Depois dela vem o carrinho e,
+na sequencia, os pedidos.

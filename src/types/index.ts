@@ -8,6 +8,17 @@ export type Profile = Tables['profiles']['Row'];
 export type Business = Tables['businesses']['Row'];
 export type BusinessMember = Tables['business_members']['Row'];
 
+export type Category = Tables['categories']['Row'];
+export type Product = Tables['products']['Row'];
+
+export type CategoryInsert = Tables['categories']['Insert'];
+export type CategoryUpdate = Tables['categories']['Update'];
+export type ProductInsert = Tables['products']['Insert'];
+export type ProductUpdate = Tables['products']['Update'];
+
+/** Categoria com os produtos que pertencem a ela, para montar o cardapio. */
+export type CategoryWithProducts = Category & { products: Product[] };
+
 export type BusinessInsert = Tables['businesses']['Insert'];
 export type BusinessUpdate = Tables['businesses']['Update'];
 export type ProfileUpdate = Tables['profiles']['Update'];

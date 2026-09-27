@@ -164,6 +164,8 @@ const slugB = `qa-empresa-b-${stamp}`;
 
 let businessA = null;
 let businessB = null;
+let categoryA = null;
+let productA = null;
 let clientA = null;
 let clientB = null;
 let sessionA = null;
@@ -387,8 +389,96 @@ try {
     check('empresa de A intacta apos as tentativas', data?.name === 'QA Empresa A - editada', data?.name ?? 'sumiu');
   }
 
-  // -------------------------------------------------- 5. recuperacao/logout
-  section('5. Recuperacao de senha e logout');
+  // ---------------------------------------------------------- 5. cardapio
+  section('5. Cardapio (categorias e produtos)');
+  {
+    const { data, error } = await clientA
+      .from('categories')
+      .insert({ business_id: businessA.id, name: 'QA Lanches', position: 1 })
+      .select('*')
+      .single();
+    check('owner cria categoria', !error && !!data, error?.message ?? data?.name);
+    categoryA = data;
+  }
+
+  if (categoryA) {
+    const { error } = await clientA
+      .from('categories')
+      .insert({ business_id: businessA.id, name: 'QA Lanches' });
+    check('categoria duplicada e bloqueada', error?.code === '23505', error?.code ?? 'sem erro');
+  }
+
+  if (categoryA) {
+    const { data, error } = await clientA
+      .from('products')
+      .insert({
+        business_id: businessA.id,
+        category_id: categoryA.id,
+        name: 'QA X-Salada',
+        description: 'Produto criado pela validacao',
+        price: 24.9,
+      })
+      .select('*')
+      .single();
+    check('owner cria produto', !error && !!data, error?.message ?? data?.name);
+    check('preco gravado corretamente', Number(data?.price) === 24.9, String(data?.price ?? '-'));
+    productA = data;
+  }
+
+  if (categoryA) {
+    const { error } = await clientA.from('categories').delete().eq('id', categoryA.id);
+    check(
+      'categoria com produtos nao pode ser excluida',
+      error?.code === '23503',
+      error?.code ?? 'sem erro',
+    );
+  }
+
+  {
+    const { data: cats } = await clientB.from('categories').select('id');
+    const { data: prods } = await clientB.from('products').select('id');
+    check(
+      'B nao enxerga o cardapio de A',
+      (cats?.length ?? 0) === 0 && (prods?.length ?? 0) === 0,
+      `${cats?.length ?? 0} categoria(s), ${prods?.length ?? 0} produto(s)`,
+    );
+  }
+
+  if (categoryA) {
+    const { error } = await clientB.from('products').insert({
+      business_id: businessA.id,
+      category_id: categoryA.id,
+      name: 'Invasao',
+      price: 1,
+    });
+    check('B nao cria produto na empresa de A', !!error, error?.code ?? 'sem erro');
+  }
+
+  if (productA) {
+    const { data } = await clientB
+      .from('products')
+      .update({ name: 'INVADIDO' })
+      .eq('id', productA.id)
+      .select('id');
+    check('B nao edita produto de A', (data?.length ?? 0) === 0, `${data?.length ?? 0} linha(s)`);
+  }
+
+  if (categoryA && businessB) {
+    const { error } = await clientB.from('products').insert({
+      business_id: businessB.id,
+      category_id: categoryA.id,
+      name: 'Cruzado',
+      price: 10,
+    });
+    check(
+      'produto de B nao aponta para categoria de A',
+      !!error,
+      error?.code ?? 'sem erro',
+    );
+  }
+
+  // -------------------------------------------------- 6. recuperacao/logout
+  section('6. Recuperacao de senha e logout');
   {
     const { error } = await clientA.auth.resetPasswordForEmail(userA.email, {
       redirectTo: `${SITE}/auth/confirmar?next=%2Fnova-senha`,
@@ -423,8 +513,8 @@ try {
     check('visitante anonimo nao enxerga empresas', (data?.length ?? 0) === 0, `${data?.length ?? 0} linha(s)`);
   }
 
-  // ------------------------------------------------------- 6. app (SSR/rotas)
-  section('6. Aplicacao Next.js (protecao de rotas)');
+  // ------------------------------------------------------- 7. app (SSR/rotas)
+  section('7. Aplicacao Next.js (protecao de rotas)');
   const appUp = await fetch('http://localhost:3000/', { redirect: 'manual' })
     .then((r) => r.status < 500)
     .catch(() => false);
@@ -473,15 +563,35 @@ try {
       const html = await res.text();
       check('configuracoes da empresa carregam para o owner', res.status === 200 && html.includes('name="businessId"'), `HTTP ${res.status}`);
     }
+
+    {
+      const res = await visit('/dashboard/cardapio', { cookie: cookieHeader });
+      const html = await res.text();
+      check(
+        'cardapio lista a categoria e o produto criados',
+        res.status === 200 && html.includes('QA Lanches') && html.includes('QA X-Salada'),
+        `HTTP ${res.status}`,
+      );
+    }
+
+    {
+      const res = await visit('/dashboard/cardapio/produtos/novo', { cookie: cookieHeader });
+      const html = await res.text();
+      check(
+        'formulario de novo produto abre para o owner',
+        res.status === 200 && html.includes('name="price"'),
+        `HTTP ${res.status}`,
+      );
+    }
   }
 } finally {
-  // ------------------------------------------------------------- 7. limpeza
-  section('7. Limpeza');
+  // ------------------------------------------------------------- 8. limpeza
+  section('8. Limpeza');
   try {
     if (businessA && clientA) {
       await clientA.storage.from('business-assets').remove([`${businessA.id}/logo-${stamp}.png`]);
       const { error } = await clientA.from('businesses').delete().eq('id', businessA.id);
-      check('empresa de teste A removida', !error, error?.message ?? '');
+      check('empresa de teste A removida (cardapio vai junto)', !error, error?.message ?? '');
     }
     if (businessB && clientB) {
       await clientB.auth.signInWithPassword(userB);
