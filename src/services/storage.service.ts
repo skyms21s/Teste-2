@@ -7,6 +7,13 @@ export const BUSINESS_ASSETS_BUCKET = 'business-assets';
 
 type Client = SupabaseClient<Database>;
 
+/** Extensao derivada do tipo validado — nunca do nome enviado (ex.: "foto.html"). */
+const EXTENSION_BY_MIME: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+};
+
 /**
  * Envia um arquivo para a pasta da empresa no Storage.
  *
@@ -19,7 +26,11 @@ export async function uploadBusinessAsset(
   file: File,
   prefix: string,
 ): Promise<string> {
-  const extension = file.name.split('.').pop()?.toLowerCase() ?? 'png';
+  const extension = EXTENSION_BY_MIME[file.type];
+  if (!extension) {
+    throw new Error('Formato de imagem nao suportado. Use PNG, JPG ou WEBP.');
+  }
+
   const path = `${businessId}/${prefix}-${Date.now()}.${extension}`;
 
   const { error } = await supabase.storage.from(BUSINESS_ASSETS_BUCKET).upload(path, file, {

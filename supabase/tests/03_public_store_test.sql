@@ -110,3 +110,8 @@ select count(*) from public.products   where business_id = '11111111-0000-4000-8
 \echo '--- P13 e nao consegue reativar a propria loja suspensa (esperado: ERRO 42501)'
 update public.businesses set status = 'active' where id = '22222222-0000-4000-8000-00000000000b';
 rollback;
+
+-- ============ LIMITES DO BUCKET ============
+-- A aplicacao dos limites e feita pela API do Storage; aqui conferimos a configuracao.
+\echo '--- P14 bucket de imagens limita tamanho e tipo (esperado: 2097152 | {image/png,image/jpeg,image/webp})'
+select file_size_limit, allowed_mime_types from storage.buckets where id = 'business-assets';

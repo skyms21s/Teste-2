@@ -6,6 +6,7 @@
 -- 1. Protege plan e status: sao controlados pela plataforma, nunca pelo cliente.
 -- 2. Expoe o cardapio publico por uma UNICA funcao, com campos escolhidos a dedo.
 --    As tabelas continuam fechadas: ninguem le linhas de outra empresa direto.
+-- 3. Limita tipo e tamanho dos arquivos no bucket de imagens.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -95,3 +96,15 @@ comment on function public.get_public_menu(text) is
 
 revoke execute on function public.get_public_menu(text) from public;
 grant  execute on function public.get_public_menu(text) to anon, authenticated;
+
+-- -----------------------------------------------------------------------------
+-- 3. Limites do bucket de imagens
+-- -----------------------------------------------------------------------------
+-- O formulario ja valida tipo e tamanho, mas quem chama a API do Storage direto
+-- pulava essa checagem (podia subir arquivos enormes ou HTML no bucket publico).
+-- Os limites no proprio bucket valem para qualquer caminho de upload.
+
+update storage.buckets
+   set file_size_limit    = 2097152, -- 2 MB
+       allowed_mime_types = array['image/png', 'image/jpeg', 'image/webp']
+ where id = 'business-assets';

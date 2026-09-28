@@ -78,15 +78,20 @@ export function ToggleProductButton({
   productId: string;
   isActive: boolean;
 }) {
-  const [, formAction] = useActionState(toggleProductActiveAction, IDLE_ACTION_STATE);
+  const [state, formAction] = useActionState(toggleProductActiveAction, IDLE_ACTION_STATE);
 
   return (
-    <form action={formAction}>
-      <input type="hidden" name="productId" value={productId} />
-      <input type="hidden" name="nextActive" value={String(!isActive)} />
-      <PendingButton variant="ghost" title={isActive ? 'Ocultar do cardapio' : 'Mostrar no cardapio'}>
-        {isActive ? 'Ocultar' : 'Ativar'}
-      </PendingButton>
-    </form>
+    <div className="flex flex-col items-end gap-1">
+      <form action={formAction}>
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="nextActive" value={String(!isActive)} />
+        <PendingButton variant="ghost" title={isActive ? 'Ocultar do cardapio' : 'Mostrar no cardapio'}>
+          {isActive ? 'Ocultar' : 'Ativar'}
+        </PendingButton>
+      </form>
+      {state.status === 'error' && state.message ? (
+        <p className="max-w-xs text-right text-xs text-red-600">{state.message}</p>
+      ) : null}
+    </div>
   );
 }

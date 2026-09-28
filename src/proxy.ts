@@ -11,10 +11,11 @@ import { AUTH_ROUTES, PROTECTED_PREFIXES, ROUTES } from '@/lib/constants/routes'
 export default async function proxy(request: NextRequest) {
   const { supabase, getResponse } = createProxyClient(request);
 
-  // getUser() valida o token no servidor do Supabase (nao confia no cookie).
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getClaims() valida a assinatura do token (localmente, com as chaves
+  // publicas do projeto; em projetos com chave simetrica cai para getUser()).
+  // Tambem renova a sessao expirada e grava os cookies novos na resposta.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims ?? null;
 
   const { pathname, search } = request.nextUrl;
 
@@ -43,8 +44,9 @@ export default async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Executa em todas as rotas, exceto arquivos estaticos e imagens.
+     * Executa em todas as rotas, exceto arquivos estaticos, imagens e a loja
+     * publica (/loja/...), que nao usa sessao e nao precisa pagar a checagem.
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|loja/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 };

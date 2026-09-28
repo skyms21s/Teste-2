@@ -102,6 +102,7 @@ npm run build              # build de producao
 npm run start              # servir o build
 npm run lint               # ESLint
 npm run typecheck          # TypeScript sem emitir arquivos
+npm test                   # testes unitarios (tests/*.test.ts, runner nativo do Node)
 npm run validate:supabase  # validacao end-to-end contra o Supabase real (secao 5)
 ```
 
@@ -200,11 +201,25 @@ supabase/
 └── tests/                       # suite SQL que valida o isolamento entre empresas
 ```
 
+### Seguranca da aplicacao
+
+- **Redirecionamentos**: o destino pos-login (`?next=`) e dos links de e-mail passa por
+  `safeRedirectPath`, que resolve a URL e so aceita a mesma origem (bloqueia `/\site.com` e
+  variantes que os navegadores tratam como link externo).
+- **Uploads**: o bucket aceita apenas PNG, JPG e WEBP de ate 2 MB, inclusive para quem chama a
+  API do Storage direto; a extensao do arquivo vem do tipo validado, nunca do nome enviado.
+- **Cabecalhos**: `nosniff`, `Referrer-Policy`, `Permissions-Policy` em todas as rotas;
+  painel e login nao podem ser embutidos em outro site (`frame-ancestors 'none'`). A loja
+  publica pode, para o restaurante exibi-la no proprio site.
+
 ### Camadas de protecao
 
 1. **`src/proxy.ts`** — redireciona visitantes de `/dashboard` e `/onboarding` para `/entrar`
-   e tira o usuario logado das telas de login/cadastro.
-2. **`src/app/dashboard/layout.tsx`** — revalida a sessao no servidor com `auth.getUser()`.
+   e tira o usuario logado das telas de login/cadastro. Usa `getClaims()`, que valida o token
+   localmente quando o projeto usa chaves assimetricas. Nao roda na loja publica.
+2. **`src/app/dashboard/layout.tsx`** — revalida a sessao no servidor com `auth.getUser()`,
+   uma unica vez por requisicao (`getAuthUser`, com `cache` do React, reaproveitado por
+   layout, pagina e servicos).
 3. **RLS no Postgres** — mesmo que as camadas acima falhem, o banco so devolve os dados das
    empresas em que o usuario e membro.
 
@@ -356,7 +371,7 @@ psql "$DATABASE_URL" -f supabase/migrations/20260201000000_menu.sql
 psql "$DATABASE_URL" -f supabase/migrations/20260301000000_public_store.sql
 psql "$DATABASE_URL" -f supabase/tests/01_rls_test.sql          # fundacao (29 casos)
 psql "$DATABASE_URL" -f supabase/tests/02_menu_test.sql         # cardapio (19 casos)
-psql "$DATABASE_URL" -f supabase/tests/03_public_store_test.sql # loja publica (13 casos)
+psql "$DATABASE_URL" -f supabase/tests/03_public_store_test.sql # loja publica (14 casos)
 ```
 
 > `00_supabase_stub.sql` recria o minimo dos schemas `auth` e `storage`. **Nao rode esse
