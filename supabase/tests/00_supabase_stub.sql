@@ -32,6 +32,8 @@ create table if not exists storage.buckets (
   id text primary key,
   name text not null,
   public boolean default false,
+  file_size_limit bigint,
+  allowed_mime_types text[],
   created_at timestamptz default now()
 );
 
@@ -54,6 +56,13 @@ end $$;
 alter table storage.objects enable row level security;
 
 grant usage on schema public, auth, storage to anon, authenticated, service_role;
+
+-- Igual ao Supabase: tabelas e funcoes criadas no schema public ja nascem com
+-- permissao para os papeis da API. Os migrations que restringem colunas
+-- (revoke/grant) precisam rodar DEPOIS disso para o teste ser fiel.
+alter default privileges in schema public grant all on tables    to anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 grant all on all tables in schema storage to anon, authenticated, service_role;
 grant select on auth.users to authenticated, service_role;
 grant execute on function auth.uid() to anon, authenticated, service_role;

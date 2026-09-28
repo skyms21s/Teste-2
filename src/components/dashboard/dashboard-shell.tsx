@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ROUTES } from '@/lib/constants/routes';
+import { ROUTES, storePath } from '@/lib/constants/routes';
 import { ROLE_LABELS } from '@/lib/utils/labels';
 import type { BusinessWithRole } from '@/types';
 import { BusinessSwitcher } from './business-switcher';
@@ -96,7 +96,14 @@ export function DashboardShell({
 
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-slate-900">{business.name}</p>
-            <p className="truncate text-xs text-slate-500">/loja/{business.slug}</p>
+            <a
+              href={storePath(business.slug)}
+              target="_blank"
+              rel="noreferrer"
+              className="block truncate text-xs text-brand-700 hover:underline"
+            >
+              Ver loja: /loja/{business.slug} ↗
+            </a>
           </div>
 
           <div className="hidden text-right sm:block">

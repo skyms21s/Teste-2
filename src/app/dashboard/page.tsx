@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requireUser, getDisplayName } from '@/services/auth.service';
 import { requireActiveBusiness } from '@/services/business.service';
 import { PLAN_LABELS, ROLE_LABELS, STATUS_LABELS } from '@/lib/utils/labels';
+import { storePath } from '@/lib/constants/routes';
 import type { BusinessStatus } from '@/types';
 
 export const metadata: Metadata = { title: 'Visao geral' };
@@ -43,7 +44,19 @@ export default async function DashboardOverviewPage() {
           <CardContent>
             <dl>
               <InfoRow label="Nome" value={business.name} />
-              <InfoRow label="Link publico" value={`/loja/${business.slug}`} />
+              <InfoRow
+                label="Link publico"
+                value={
+                  <a
+                    href={storePath(business.slug)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-brand-700 hover:underline"
+                  >
+                    /loja/{business.slug} ↗
+                  </a>
+                }
+              />
               <InfoRow label="Plano atual" value={<Badge tone="brand">{PLAN_LABELS[business.plan]}</Badge>} />
               <InfoRow
                 label="Status"

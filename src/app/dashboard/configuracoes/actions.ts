@@ -5,42 +5,12 @@ import { createClient } from '@/lib/supabase/server';
 import { translateDbError } from '@/lib/supabase/errors';
 import { imageFileSchema, updateBusinessSchema } from '@/lib/validations/business';
 import { ROUTES } from '@/lib/constants/routes';
+import {
+  removeBusinessAssets,
+  storagePathFromPublicUrl,
+  uploadBusinessAsset,
+} from '@/services/storage.service';
 import type { ActionState, BusinessUpdate } from '@/types';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '@/types/database.types';
-
-const BUCKET = 'business-assets';
-
-type Client = SupabaseClient<Database>;
-
-/** Extrai o caminho do objeto a partir da URL publica do Storage. */
-function storagePathFromPublicUrl(url: string | null): string | null {
-  if (!url) return null;
-  const marker = `/storage/v1/object/public/${BUCKET}/`;
-  const index = url.indexOf(marker);
-  return index === -1 ? null : decodeURIComponent(url.slice(index + marker.length));
-}
-
-async function uploadAsset(
-  supabase: Client,
-  businessId: string,
-  file: File,
-  kind: 'logo' | 'cover',
-): Promise<string> {
-  const extension = file.name.split('.').pop()?.toLowerCase() ?? 'png';
-  const path = `${businessId}/${kind}-${Date.now()}.${extension}`;
-
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    contentType: file.type,
-    upsert: true,
-  });
-
-  if (error) {
-    throw new Error('Falha ao enviar a imagem. Tente novamente.');
-  }
-
-  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
-}
 
 /**
  * Atualiza os dados da empresa. Somente o owner consegue gravar:
@@ -117,7 +87,7 @@ export async function updateBusinessAction(
     }
 
     try {
-      const publicUrl = await uploadAsset(supabase, businessId, file, kind);
+      const publicUrl = await uploadBusinessAsset(supabase, businessId, file, kind);
       const previous = storagePathFromPublicUrl(
         kind === 'logo' ? (current?.logo_url ?? null) : (current?.cover_url ?? null),
       );
@@ -140,9 +110,7 @@ export async function updateBusinessAction(
     return { status: 'error', message: translateDbError(error) };
   }
 
-  if (replacedPaths.length > 0) {
-    await supabase.storage.from(BUCKET).remove(replacedPaths);
-  }
+  await removeBusinessAssets(supabase, replacedPaths);
 
   revalidatePath(ROUTES.settings);
   revalidatePath(ROUTES.dashboard);

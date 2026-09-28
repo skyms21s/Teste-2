@@ -42,18 +42,28 @@ export async function createBusinessAction(
     redirect(ROUTES.signIn);
   }
 
-  const { data, error } = await supabase
-    .from('businesses')
-    .insert(parsed.data)
-    .select('id')
-    .single();
+  // Sem .select() encadeado de proposito: um INSERT ... RETURNING faz o Postgres
+  // aplicar a policy de leitura na linha devolvida, e nesse instante o vinculo de
+  // owner (criado pelo trigger on_business_created) ainda nao existe. A empresa e
+  // lida logo abaixo, quando o vinculo ja esta gravado.
+  const { error } = await supabase.from('businesses').insert(parsed.data);
 
-  if (error || !data) {
+  if (error) {
     return {
       status: 'error',
-      message: error ? translateDbError(error) : 'Nao foi possivel criar a empresa.',
-      fieldErrors: error?.code === '23505' ? { slug: ['Este link ja esta em uso.'] } : undefined,
+      message: translateDbError(error),
+      fieldErrors: error.code === '23505' ? { slug: ['Este link ja esta em uso.'] } : undefined,
     };
+  }
+
+  const { data, error: readError } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('slug', parsed.data.slug)
+    .single();
+
+  if (readError || !data) {
+    return { status: 'error', message: 'Empresa criada, mas nao foi possivel abri-la. Recarregue a pagina.' };
   }
 
   const cookieStore = await cookies();

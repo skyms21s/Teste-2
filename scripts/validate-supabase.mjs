@@ -18,12 +18,20 @@ import { createServerClient } from '@supabase/ssr';
 // ---------------------------------------------------------------- utilidades
 const results = [];
 let failures = 0;
+let skipped = 0;
 
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail });
   const icon = ok ? '\x1b[32mOK  \x1b[0m' : '\x1b[31mFALHA\x1b[0m';
   console.log(`  ${icon} ${name}${detail ? ` \x1b[90m(${detail})\x1b[0m` : ''}`);
   if (!ok) failures += 1;
+}
+
+/** Verificacao que nao se aplica neste ambiente: nao conta como OK nem como falha. */
+function skip(name, reason) {
+  results.push({ name, ok: null, detail: reason });
+  skipped += 1;
+  console.log(`  \x1b[90mPULADO\x1b[0m ${name} \x1b[90m(${reason})\x1b[0m`);
 }
 
 function section(title) {
@@ -57,6 +65,55 @@ function loadEnv(file = '.env.local') {
 
 const anonClient = (url, key) =>
   createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+
+/** Traduz a falha de cadastro na acao concreta que resolve. */
+function signUpHint(error) {
+  const code = error?.code ?? '';
+  const message = (error?.message ?? '').toLowerCase();
+
+  if (code === 'over_email_send_rate_limit' || message.includes('email rate limit')) {
+    return (
+      'O limite de envio de e-mails do Supabase foi atingido. Isso so acontece porque "Confirm email" ' +
+      'esta LIGADO: com ele ligado, cada cadastro dispara um e-mail, e o SMTP padrao permite poucos por hora. ' +
+      'Desligue em Authentication > Sign In / Providers > Email (botao Save) e rode o script de novo — ' +
+      'sem confirmacao nenhum e-mail e enviado e o limite deixa de valer. ' +
+      'Religue depois para testar a confirmacao manualmente com o seu e-mail real.'
+    );
+  }
+  if (code === 'signup_disabled' || message.includes('signups not allowed')) {
+    return 'Cadastro desativado. Ligue "Allow new users to sign up" em Authentication > Sign In / Providers.';
+  }
+  if (code === 'email_provider_disabled' || message.includes('email signups are disabled')) {
+    return 'Provedor Email desativado. Ligue "Enable Email provider" em Authentication > Sign In / Providers > Email.';
+  }
+  if (code === 'email_address_invalid') {
+    return 'O Supabase recusou os enderecos de teste. Verifique se ha restricao de dominio em Authentication > Attack Protection.';
+  }
+
+  return 'Confira Authentication > Sign In / Providers > Email: provedor habilitado e cadastro liberado.';
+}
+
+/** Diagnostica a recusa do INSERT em businesses com o estado real da sessao. */
+function insertHint(error, session, user) {
+  if (error.code !== '42501') return error.message;
+
+  if (!session || !user) {
+    return (
+      'O pedido chegou ao Supabase SEM sessao (como visitante anonimo), por isso o RLS recusou. ' +
+      'Rode o script de novo; se repetir, o login nao esta sendo mantido entre as chamadas.'
+    );
+  }
+
+  return (
+    `A sessao esta ativa (usuario ${user.id}), entao o RLS recusou o INSERT mesmo com o usuario logado. ` +
+    'Isso indica que a policy de insercao nao foi criada. No SQL Editor do Supabase rode:\n\n' +
+    "    select policyname, cmd, roles::text, with_check\n" +
+    "      from pg_policies where schemaname='public' and tablename='businesses';\n\n" +
+    'Tem que aparecer businesses_insert_authenticated com cmd=INSERT, roles={authenticated} e ' +
+    'with_check=(auth.uid() IS NOT NULL). Se nao aparecer, rode a migration novamente ' +
+    '(supabase/migrations/20260101000000_init_multitenant.sql) e repita a validacao.'
+  );
+}
 
 // ------------------------------------------------------------------- inicio
 const env = loadEnv();
@@ -107,6 +164,8 @@ const slugB = `qa-empresa-b-${stamp}`;
 
 let businessA = null;
 let businessB = null;
+let categoryA = null;
+let productA = null;
 let clientA = null;
 let clientB = null;
 let sessionA = null;
@@ -124,14 +183,35 @@ try {
 
   {
     const supabase = anonClient(URL_, KEY);
-    for (const table of ['businesses', 'profiles', 'business_members']) {
+    // Cada tabela aponta o migration que a cria, para a dica ja dizer o que rodar.
+    const MIGRATION_OF = {
+      businesses: '20260101000000_init_multitenant.sql',
+      profiles: '20260101000000_init_multitenant.sql',
+      business_members: '20260101000000_init_multitenant.sql',
+      categories: '20260201000000_menu.sql',
+      products: '20260201000000_menu.sql',
+    };
+
+    for (const [table, migration] of Object.entries(MIGRATION_OF)) {
       const { error } = await supabase.from(table).select('id').limit(1);
       const missing = error?.code === 'PGRST205' || error?.code === '42P01';
       check(`tabela public.${table} existe`, !missing, missing ? error.message : '');
       if (missing) {
         stop(
           `a tabela ${table} nao existe no projeto.`,
-          'Rode supabase/migrations/20260101000000_init_multitenant.sql no SQL Editor do Supabase.',
+          `Rode supabase/migrations/${migration} no SQL Editor do Supabase (os arquivos vao na ordem do nome).`,
+        );
+      }
+    }
+
+    {
+      const { error } = await supabase.rpc('get_public_menu', { p_slug: 'verificacao-de-schema' });
+      const missing = error?.code === 'PGRST202' || error?.code === '42883';
+      check('funcao get_public_menu existe', !missing, missing ? error.message : '');
+      if (missing) {
+        stop(
+          'a funcao da loja publica nao existe no projeto.',
+          'Rode supabase/migrations/20260301000000_public_store.sql no SQL Editor do Supabase.',
         );
       }
     }
@@ -147,9 +227,7 @@ try {
   {
     const { data, error } = await signUpWithFallback(clientA, userA, 'QA Owner A');
     check('cadastro do usuario A', !error, error?.message ?? userA.email);
-    if (error) {
-      stop('o cadastro falhou.', 'Verifique se o provedor Email esta habilitado em Authentication > Sign In / Providers.');
-    }
+    if (error) stop('o cadastro falhou.', signUpHint(error));
 
     if (!data.session) {
       console.log('\n\x1b[33mConfirmacao de e-mail esta ATIVA neste projeto.\x1b[0m');
@@ -181,21 +259,35 @@ try {
   }
 
   {
-    const { error } = await clientA.auth.signInWithPassword({ ...userA, password: 'senha-errada-123' });
+    // Cliente separado: uma tentativa falha nunca pode afetar a sessao do usuario A.
+    const probe = anonClient(URL_, KEY);
+    const { error } = await probe.auth.signInWithPassword({ ...userA, password: 'senha-errada-123' });
     check('login com senha errada e rejeitado', !!error, error?.code ?? '');
-    await clientA.auth.signInWithPassword(userA);
   }
 
   // ------------------------------------------------------------- 3. empresa
   section('3. Empresa (multitenant)');
   {
-    const { data, error } = await clientA
+    const { data: sessionCheck } = await clientA.auth.getUser();
+    check('sessao ativa antes de criar a empresa', !!sessionCheck.user, sessionCheck.user?.id ?? 'sem sessao');
+
+    // Mesmo padrao do app: INSERT sem RETURNING (a policy de leitura so passa
+    // depois que o trigger grava o vinculo de owner), seguido da leitura.
+    const { error } = await clientA
       .from('businesses')
-      .insert({ name: 'QA Empresa A', slug: slugA, phone: '11999990000' })
-      .select('*')
-      .single();
+      .insert({ name: 'QA Empresa A', slug: slugA, phone: '11999990000' });
+
+    const { data } = error
+      ? { data: null }
+      : await clientA.from('businesses').select('*').eq('slug', slugA).single();
+
     check('criacao da empresa A', !error && !!data, error?.message ?? slugA);
     businessA = data;
+
+    if (error) {
+      const { data: current } = await clientA.auth.getSession();
+      stop('nao consegui criar a empresa A.', insertHint(error, current.session, sessionCheck.user));
+    }
   }
 
   if (businessA) {
@@ -225,6 +317,22 @@ try {
   }
 
   {
+    const { error } = await clientA
+      .from('businesses')
+      .update({ plan: 'enterprise' })
+      .eq('id', businessA.id);
+    check('owner nao consegue mudar o proprio plano', error?.code === '42501', error?.code ?? 'ALTEROU!');
+  }
+
+  {
+    const { error } = await clientA
+      .from('businesses')
+      .update({ status: 'active' })
+      .eq('id', businessA.id);
+    check('owner nao consegue mudar o proprio status', error?.code === '42501', error?.code ?? 'ALTEROU!');
+  }
+
+  {
     const file = new Blob([Buffer.from('89504e470d0a1a0a', 'hex')], { type: 'image/png' });
     const path = `${businessA.id}/logo-${stamp}.png`;
     const { error } = await clientA.storage.from('business-assets').upload(path, file, {
@@ -240,15 +348,23 @@ try {
   {
     const { data, error } = await signUpWithFallback(clientB, userB, 'QA Owner B');
     check('cadastro do usuario B', !error && !!data?.session, error?.message ?? userB.email);
-    if (error || !data?.session) stop('nao consegui criar o segundo usuario para testar o isolamento.');
+    if (error || !data?.session) {
+      stop(
+        'nao consegui criar o segundo usuario para testar o isolamento.',
+        error ? signUpHint(error) : 'Desligue "Confirm email" em Authentication > Sign In / Providers > Email.',
+      );
+    }
   }
 
   {
-    const { data, error } = await clientB
+    const { error } = await clientB
       .from('businesses')
-      .insert({ name: 'QA Empresa B', slug: slugB })
-      .select('*')
-      .single();
+      .insert({ name: 'QA Empresa B', slug: slugB });
+
+    const { data } = error
+      ? { data: null }
+      : await clientB.from('businesses').select('*').eq('slug', slugB).single();
+
     check('criacao da empresa B', !error && !!data, error?.message ?? slugB);
     businessB = data;
   }
@@ -310,20 +426,152 @@ try {
     check('empresa de A intacta apos as tentativas', data?.name === 'QA Empresa A - editada', data?.name ?? 'sumiu');
   }
 
-  // -------------------------------------------------- 5. recuperacao/logout
-  section('5. Recuperacao de senha e logout');
+  // ---------------------------------------------------------- 5. cardapio
+  section('5. Cardapio (categorias e produtos)');
+  {
+    const { data, error } = await clientA
+      .from('categories')
+      .insert({ business_id: businessA.id, name: 'QA Lanches', position: 1 })
+      .select('*')
+      .single();
+    check('owner cria categoria', !error && !!data, error?.message ?? data?.name);
+    categoryA = data;
+  }
+
+  if (categoryA) {
+    const { error } = await clientA
+      .from('categories')
+      .insert({ business_id: businessA.id, name: 'QA Lanches' });
+    check('categoria duplicada e bloqueada', error?.code === '23505', error?.code ?? 'sem erro');
+  }
+
+  if (categoryA) {
+    const { data, error } = await clientA
+      .from('products')
+      .insert({
+        business_id: businessA.id,
+        category_id: categoryA.id,
+        name: 'QA X-Salada',
+        description: 'Produto criado pela validacao',
+        price: 24.9,
+      })
+      .select('*')
+      .single();
+    check('owner cria produto', !error && !!data, error?.message ?? data?.name);
+    check('preco gravado corretamente', Number(data?.price) === 24.9, String(data?.price ?? '-'));
+    productA = data;
+  }
+
+  if (categoryA) {
+    const { error } = await clientA.from('categories').delete().eq('id', categoryA.id);
+    check(
+      'categoria com produtos nao pode ser excluida',
+      error?.code === '23503',
+      error?.code ?? 'sem erro',
+    );
+  }
+
+  {
+    const { data: cats } = await clientB.from('categories').select('id');
+    const { data: prods } = await clientB.from('products').select('id');
+    check(
+      'B nao enxerga o cardapio de A',
+      (cats?.length ?? 0) === 0 && (prods?.length ?? 0) === 0,
+      `${cats?.length ?? 0} categoria(s), ${prods?.length ?? 0} produto(s)`,
+    );
+  }
+
+  if (categoryA) {
+    const { error } = await clientB.from('products').insert({
+      business_id: businessA.id,
+      category_id: categoryA.id,
+      name: 'Invasao',
+      price: 1,
+    });
+    check('B nao cria produto na empresa de A', !!error, error?.code ?? 'sem erro');
+  }
+
+  if (productA) {
+    const { data } = await clientB
+      .from('products')
+      .update({ name: 'INVADIDO' })
+      .eq('id', productA.id)
+      .select('id');
+    check('B nao edita produto de A', (data?.length ?? 0) === 0, `${data?.length ?? 0} linha(s)`);
+  }
+
+  if (categoryA && businessB) {
+    const { error } = await clientB.from('products').insert({
+      business_id: businessB.id,
+      category_id: categoryA.id,
+      name: 'Cruzado',
+      price: 10,
+    });
+    check(
+      'produto de B nao aponta para categoria de A',
+      !!error,
+      error?.code ?? 'sem erro',
+    );
+  }
+
+  // ------------------------------------------------------- 6. loja publica
+  section('6. Loja publica (/loja/{slug})');
+  {
+    const visitor = anonClient(URL_, KEY);
+    const { data, error } = await visitor.rpc('get_public_menu', { p_slug: slugA });
+    const names = JSON.stringify(data ?? {});
+    check(
+      'visitante anonimo le o cardapio publico',
+      !error && data?.business?.name === 'QA Empresa A - editada',
+      error?.message ?? data?.business?.name ?? 'sem dados',
+    );
+    check('produto ativo aparece na vitrine', names.includes('QA X-Salada'), '');
+    check(
+      'vitrine nao expoe plano, status nem ids da empresa',
+      data && !('plan' in data.business) && !('status' in data.business) && !('id' in data.business),
+      Object.keys(data?.business ?? {}).join(', '),
+    );
+
+    const { data: missing } = await visitor.rpc('get_public_menu', { p_slug: `nao-existe-${stamp}` });
+    check('slug inexistente devolve vazio', missing === null, JSON.stringify(missing));
+
+    if (productA) {
+      await clientA.from('products').update({ is_active: false }).eq('id', productA.id);
+      const { data: afterHide } = await visitor.rpc('get_public_menu', { p_slug: slugA });
+      check(
+        'produto ocultado some da vitrine',
+        !JSON.stringify(afterHide ?? {}).includes('QA X-Salada'),
+        '',
+      );
+      await clientA.from('products').update({ is_active: true }).eq('id', productA.id);
+    }
+
+    const { data: rows } = await visitor.from('businesses').select('id');
+    check('visitante continua sem ler a tabela direto', (rows?.length ?? 0) === 0, `${rows?.length ?? 0} linha(s)`);
+  }
+
+  // -------------------------------------------------- 7. recuperacao/logout
+  section('7. Recuperacao de senha e logout');
   {
     const { error } = await clientA.auth.resetPasswordForEmail(userA.email, {
       redirectTo: `${SITE}/auth/confirmar?next=%2Fnova-senha`,
     });
-    const rateLimited = error?.code === 'over_email_send_rate_limit';
-    check(
-      'pedido de recuperacao de senha aceito',
-      !error || rateLimited,
-      rateLimited
-        ? 'limite de e-mails do SMTP padrao atingido (endpoint OK; teste a entrega com seu e-mail real)'
-        : (error?.message ?? 'e-mail disparado pelo Supabase'),
-    );
+    if (!error) {
+      check('pedido de recuperacao de senha aceito', true, 'e-mail disparado pelo Supabase');
+    } else if (error.code === 'email_address_invalid') {
+      skip(
+        'pedido de recuperacao de senha',
+        'o Supabase nao envia para dominios reservados de teste (example.com) — ' +
+          'teste a recuperacao com o seu e-mail real, pela tela /recuperar-senha',
+      );
+    } else if (error.code === 'over_email_send_rate_limit') {
+      skip(
+        'pedido de recuperacao de senha',
+        'limite de envio do SMTP padrao atingido — o endpoint respondeu, mas o e-mail nao saiu',
+      );
+    } else {
+      check('pedido de recuperacao de senha aceito', false, error.message);
+    }
   }
 
   {
@@ -338,8 +586,8 @@ try {
     check('visitante anonimo nao enxerga empresas', (data?.length ?? 0) === 0, `${data?.length ?? 0} linha(s)`);
   }
 
-  // ------------------------------------------------------- 6. app (SSR/rotas)
-  section('6. Aplicacao Next.js (protecao de rotas)');
+  // ------------------------------------------------------- 8. app (SSR/rotas)
+  section('8. Aplicacao Next.js (protecao de rotas)');
   const appUp = await fetch('http://localhost:3000/', { redirect: 'manual' })
     .then((r) => r.status < 500)
     .catch(() => false);
@@ -388,15 +636,50 @@ try {
       const html = await res.text();
       check('configuracoes da empresa carregam para o owner', res.status === 200 && html.includes('name="businessId"'), `HTTP ${res.status}`);
     }
+
+    {
+      const res = await visit('/dashboard/cardapio', { cookie: cookieHeader });
+      const html = await res.text();
+      check(
+        'cardapio lista a categoria e o produto criados',
+        res.status === 200 && html.includes('QA Lanches') && html.includes('QA X-Salada'),
+        `HTTP ${res.status}`,
+      );
+    }
+
+    {
+      const res = await visit(`/loja/${slugA}`);
+      const html = await res.text();
+      check(
+        'pagina publica da loja abre sem login',
+        res.status === 200 && html.includes('QA X-Salada'),
+        `HTTP ${res.status}`,
+      );
+    }
+
+    {
+      const res = await visit(`/loja/nao-existe-${stamp}`);
+      check('loja inexistente responde 404', res.status === 404, `HTTP ${res.status}`);
+    }
+
+    {
+      const res = await visit('/dashboard/cardapio/produtos/novo', { cookie: cookieHeader });
+      const html = await res.text();
+      check(
+        'formulario de novo produto abre para o owner',
+        res.status === 200 && html.includes('name="price"'),
+        `HTTP ${res.status}`,
+      );
+    }
   }
 } finally {
-  // ------------------------------------------------------------- 7. limpeza
-  section('7. Limpeza');
+  // ------------------------------------------------------------- 9. limpeza
+  section('9. Limpeza');
   try {
     if (businessA && clientA) {
       await clientA.storage.from('business-assets').remove([`${businessA.id}/logo-${stamp}.png`]);
       const { error } = await clientA.from('businesses').delete().eq('id', businessA.id);
-      check('empresa de teste A removida', !error, error?.message ?? '');
+      check('empresa de teste A removida (cardapio vai junto)', !error, error?.message ?? '');
     }
     if (businessB && clientB) {
       await clientB.auth.signInWithPassword(userB);
@@ -409,10 +692,18 @@ try {
     check('limpeza', false, error.message);
   }
 
+  const total = results.length - skipped;
   console.log(
-    `\n\x1b[1mResultado:\x1b[0m ${results.filter((r) => r.ok).length}/${results.length} verificacoes OK` +
+    `\n\x1b[1mResultado:\x1b[0m ${results.filter((r) => r.ok).length}/${total} verificacoes OK` +
+      (skipped ? `, \x1b[90m${skipped} pulada(s)\x1b[0m` : '') +
       (failures ? `, \x1b[31m${failures} falha(s)\x1b[0m` : ', \x1b[32mnenhuma falha\x1b[0m'),
   );
+  if (skipped) {
+    console.log(
+      '\x1b[90mAs verificacoes puladas dependem de um e-mail real e entram no teste manual ' +
+        '(confirmacao de cadastro e recuperacao de senha).\x1b[0m',
+    );
+  }
   console.log(
     `\x1b[90mOs usuarios de teste (${userA.email} e ${userB.email}) continuam em Authentication > Users; ` +
       `remova manualmente se quiser.\x1b[0m\n`,
