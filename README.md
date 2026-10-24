@@ -111,6 +111,40 @@ Fluxo para testar: `/cadastro` -> confirmar e-mail -> `/onboarding` (cria a empr
 
 ---
 
+## 4.1 Publicar na Vercel
+
+O projeto roda na Vercel sem configuracao extra (Next.js e detectado sozinho).
+
+1. **Supabase primeiro**: aplique todos os arquivos de `supabase/migrations/` (secao 2).
+2. Em <https://vercel.com/new>, entre com o GitHub e **importe** o repositorio. A Vercel publica
+   a branch `main` em producao e cria um preview para cada PR.
+3. Em **Environment Variables**, adicione:
+
+   | Variavel | Valor |
+   | -------- | ----- |
+   | `NEXT_PUBLIC_SUPABASE_URL` | a mesma do `.env.local` |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | a mesma do `.env.local` |
+   | `NEXT_PUBLIC_SITE_URL` | opcional — so se usar dominio proprio (ex.: `https://meucardapio.com.br`) |
+
+   Sem `NEXT_PUBLIC_SITE_URL`, os links de e-mail usam o dominio de producao da Vercel
+   automaticamente (`VERCEL_PROJECT_PRODUCTION_URL`).
+4. Clique em **Deploy**. Ao terminar, copie o endereco (`https://<projeto>.vercel.app`).
+5. No Supabase, em **Authentication > URL Configuration**:
+   - **Site URL**: `https://<projeto>.vercel.app`
+   - **Redirect URLs**: adicione `https://<projeto>.vercel.app/auth/confirmar` (mantenha a de
+     `localhost` para continuar testando no PC)
+6. Valide o site publicado:
+
+   ```bash
+   # PowerShell (Windows)
+   $env:APP_URL="https://<projeto>.vercel.app"; npm run validate:supabase
+   # Mac/Linux
+   APP_URL=https://<projeto>.vercel.app npm run validate:supabase
+   ```
+
+Variaveis `NEXT_PUBLIC_*` entram no build: depois de mudar alguma na Vercel, faca um
+**Redeploy** para valer.
+
 ## 5. Validar no Supabase real
 
 Com o `.env.local` preenchido e o schema aplicado:

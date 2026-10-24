@@ -9,6 +9,9 @@
  *
  * Se o app estiver rodando em http://localhost:3000, o script tambem testa
  * a protecao de rotas e a renderizacao do dashboard com a sessao real.
+ * Para testar o site publicado, aponte APP_URL para ele:
+ *   PowerShell:  $env:APP_URL="https://seu-site.vercel.app"; npm run validate:supabase
+ *   Mac/Linux:   APP_URL=https://seu-site.vercel.app npm run validate:supabase
  */
 
 import { readFileSync } from 'node:fs';
@@ -120,6 +123,8 @@ const env = loadEnv();
 const URL_ = env.NEXT_PUBLIC_SUPABASE_URL;
 const KEY = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SITE = env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+// APP_URL=https://seu-site.vercel.app npm run validate:supabase  -> testa o site publicado
+const APP = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 if (!URL_ || !KEY) {
   stop(
@@ -588,12 +593,12 @@ try {
 
   // ------------------------------------------------------- 8. app (SSR/rotas)
   section('8. Aplicacao Next.js (protecao de rotas)');
-  const appUp = await fetch('http://localhost:3000/', { redirect: 'manual' })
+  const appUp = await fetch(`${APP}/`, { redirect: 'manual' })
     .then((r) => r.status < 500)
     .catch(() => false);
 
   if (!appUp) {
-    console.log('  \x1b[90mPULADO: app nao esta rodando. Rode "npm run dev" em outro terminal e repita.\x1b[0m');
+    console.log(`  \x1b[90mPULADO: app nao respondeu em ${APP}. Rode "npm run dev" (ou defina APP_URL) e repita.\x1b[0m`);
   } else {
     const jar = new Map();
     const ssr = createServerClient(URL_, KEY, {
@@ -609,7 +614,7 @@ try {
     const cookieHeader = [...jar.entries()].map(([n, v]) => `${n}=${encodeURIComponent(v)}`).join('; ');
 
     const visit = (path, headers = {}) =>
-      fetch(`http://localhost:3000${path}`, { redirect: 'manual', headers });
+      fetch(`${APP}${path}`, { redirect: 'manual', headers });
 
     for (const path of ['/dashboard', '/dashboard/pedidos', '/onboarding']) {
       const res = await visit(path);
