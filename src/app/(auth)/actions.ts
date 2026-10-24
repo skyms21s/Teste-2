@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { translateAuthError } from '@/lib/supabase/errors';
 import { getSiteUrl } from '@/lib/env';
 import { ROUTES } from '@/lib/constants/routes';
+import { safeRedirectPath } from '@/lib/utils/safe-redirect';
 import {
   forgotPasswordSchema,
   newPasswordSchema,
@@ -17,11 +18,6 @@ function invalid(fieldErrors: Record<string, string[]>): ActionState {
   return { status: 'error', message: 'Revise os campos destacados.', fieldErrors };
 }
 
-/** Garante que o redirect pos-login e interno (evita open redirect). */
-function safeNext(value: FormDataEntryValue | null): string {
-  const next = typeof value === 'string' ? value : '';
-  return next.startsWith('/') && !next.startsWith('//') ? next : ROUTES.dashboard;
-}
 
 export async function signInAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = signInSchema.safeParse({
@@ -40,7 +36,7 @@ export async function signInAction(_prev: ActionState, formData: FormData): Prom
     return { status: 'error', message: translateAuthError(error) };
   }
 
-  redirect(safeNext(formData.get('next')));
+  redirect(safeRedirectPath(formData.get('next'), ROUTES.dashboard));
 }
 
 export async function signUpAction(_prev: ActionState, formData: FormData): Promise<ActionState> {

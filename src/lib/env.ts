@@ -22,11 +22,19 @@ export function getSupabaseAnonKey(): string {
   return required(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, 'NEXT_PUBLIC_SUPABASE_ANON_KEY');
 }
 
-/** URL base usada nos links enviados por e-mail (confirmacao / recuperacao). */
+/**
+ * URL base usada nos links enviados por e-mail (confirmacao / recuperacao).
+ *
+ * Na Vercel, sem NEXT_PUBLIC_SITE_URL, usa o dominio de PRODUCAO do projeto
+ * (VERCEL_PROJECT_PRODUCTION_URL). VERCEL_URL nao serve: e o endereco unico de
+ * cada deploy, que muda a todo push e nao esta na lista de redirects do Supabase.
+ */
 export function getSiteUrl(): string {
+  const vercelProduction = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+
   const url =
     process.env.NEXT_PUBLIC_SITE_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    (vercelProduction ? `https://${vercelProduction}` : 'http://localhost:3000');
 
   return url.replace(/\/$/, '');
 }

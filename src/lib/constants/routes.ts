@@ -13,6 +13,11 @@ export const ROUTES = {
   settings: '/dashboard/configuracoes',
 } as const;
 
+/** URL publica do cardapio de uma loja. */
+export function storePath(slug: string): string {
+  return `/loja/${slug}`;
+}
+
 /** Rotas que exigem usuario autenticado. */
 export const PROTECTED_PREFIXES = ['/dashboard', '/onboarding'] as const;
 

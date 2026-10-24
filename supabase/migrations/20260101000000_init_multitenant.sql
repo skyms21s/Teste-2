@@ -241,7 +241,11 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Quem cria a empresa vira owner automaticamente
+-- Quem cria a empresa vira owner automaticamente.
+-- ATENCAO: como o vinculo so nasce depois do INSERT, um
+-- "insert ... returning" na criacao da empresa e recusado pelo RLS (o
+-- RETURNING aplica a policy de leitura antes do trigger rodar). Crie a empresa
+-- com um INSERT simples e leia a linha em seguida (ver src/app/onboarding/actions.ts).
 create or replace function public.handle_new_business()
 returns trigger
 language plpgsql

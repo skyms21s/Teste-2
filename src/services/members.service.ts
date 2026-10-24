@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { createClient } from '@/lib/supabase/server';
+import { getAuthUser } from '@/services/auth.service';
 import type { MemberRole, Profile } from '@/types';
 
 export interface BusinessMemberWithProfile {
@@ -44,13 +45,10 @@ export async function listBusinessMembers(businessId: string): Promise<BusinessM
 
 /** Papel do usuario logado dentro de uma empresa (null quando nao e membro). */
 export async function getUserRole(businessId: string): Promise<MemberRole | null> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const user = await getAuthUser();
   if (!user) return null;
+
+  const supabase = await createClient();
 
   const { data } = await supabase
     .from('business_members')
